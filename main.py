@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, HTTPException, Query
 
 from data import find_course, get_all_courses
-from models import Course
+from models import Course, Stats
 
 app = FastAPI(title="Course Catalog API")
 
@@ -46,3 +46,13 @@ def get_course(course_id: str):
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
     return course
+
+
+@app.get("/stats", response_model=Stats)
+def get_stats():
+    courses = get_all_courses()
+    return Stats(
+        total=len(courses),
+        total_credits=sum(c.credits for c in courses),
+        electives=sum(1 for c in courses if c.is_elective),
+    )
