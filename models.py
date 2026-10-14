@@ -1,7 +1,16 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
-class Course(BaseModel):
+class CamelModel(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        validate_by_name=True,
+        validate_by_alias=True,
+    )
+
+
+class Course(CamelModel):
     id: str
     title: str
     description: str
@@ -10,7 +19,7 @@ class Course(BaseModel):
     likes: int = 0
 
 
-class Stats(BaseModel):
+class Stats(CamelModel):
     total: int
     total_credits: int
     electives: int
