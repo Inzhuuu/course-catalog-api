@@ -23,3 +23,12 @@ class Stats(CamelModel):
     total: int
     total_credits: int
     electives: int
+
+
+class EnrollmentIn(CamelModel):
+    course_id: str
+    student_name: str = Field(min_length=2)
+
+
+class Enrollment(EnrollmentIn):
+    id: int
