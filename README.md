@@ -66,3 +66,59 @@ type stays `str`.
 - search by title with `q` (case-insensitive): `?q=react` gives
   modern-frontend, `?q=api` gives backend-fastapi and api-design
 - `GET /stats` with its own `Stats` model: `{"total": 6, "total_credits": 28, "electives": 2}`
+
+## Lab 5 — What changed
+
+### CORS
+
+`CORSMiddleware` allows exactly one origin: `http://localhost:3000` (the
+Next.js frontend; scheme + host + port, no trailing slash). The browser needs
+this permission to let the frontend's JavaScript read responses from
+`localhost:8000` — it's a different origin. Requests from the Next.js server
+(Server Components) don't need CORS at all. CORS doesn't protect data: the
+server still answers any origin, it just doesn't give the browser permission.
+
+```bash
+curl -i -H "Origin: http://localhost:3000" http://localhost:8000/
+# access-control-allow-origin: http://localhost:3000
+# vary: Origin
+curl -i -H "Origin: http://evil.example" http://localhost:8000/
+# 200, but no access-control-allow-origin
+```
+
+### camelCase in JSON
+
+All models inherit from `CamelModel` (`alias_generator=to_camel`,
+`validate_by_name=True`, `validate_by_alias=True`). Python keeps snake_case,
+JSON uses camelCase: `is_elective` → `isElective`, `course_id` → `courseId`,
+`student_name` → `studentName`. Query parameters don't change:
+`/courses?is_elective=true` still returns 2 courses.
+
+### New routes
+
+`POST /courses/{course_id}/like` — adds one like, returns the updated course
+(`POST /courses/nope/like` → 404):
+
+```json
+{"id": "web-security", "title": "Web Security Essentials", "description": "JWT/OAuth2, XSS, CSRF, and SQL injection defense.", "credits": 4, "isElective": false, "likes": 22}
+```
+
+`POST /enrollments` — body `{"courseId": "web-security", "studentName": "Aigerim"}`,
+answers 201:
+
+```json
+{"courseId": "web-security", "studentName": "Aigerim", "id": 1}
+```
+
+A one-letter name gives 422 (`"loc": ["body", "studentName"]`,
+`"msg": "String should have at least 2 characters"`), an unknown course gives
+404 `{"detail": "Course not found"}`.
+
+`GET /enrollments` — all enrollments:
+
+```json
+[{"courseId": "web-security", "studentName": "Aigerim", "id": 1}]
+```
+
+Likes and enrollments live in memory, so they reset every time the server
+restarts.
