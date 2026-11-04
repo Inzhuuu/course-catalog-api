@@ -67,12 +67,15 @@ def list_courses(
     db: SessionDep,
     p: Annotated[dict, Depends(pagination)],
     is_elective: bool | None = None,
+    level: str | None = None,
     sort: Literal["popular", "title"] = "popular",
     q: str | None = None,
 ):
     stmt = select(Course)
     if is_elective is not None:
         stmt = stmt.where(Course.is_elective == is_elective)
+    if level is not None:
+        stmt = stmt.where(Course.level == level)
     if q:
         stmt = stmt.where(Course.title.icontains(q))
     if sort == "title":
