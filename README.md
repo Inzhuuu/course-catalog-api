@@ -196,6 +196,42 @@ Experiment 6 in detail (`try_protection.py`, `flood_likes.py`):
   error.`, so internals like SQL text don't leak, while the full traceback
   stays in the server log for the developer.
 
+## Bonus
+
+### Task 1. Validation errors as Problem Details too
+
+After step 1 the four rule errors were Problem Details, but a Pydantic
+validation error still came in FastAPI's own format: `python try_post.py N bad`
+gave `422 application/json` with `{"detail": [{"type": "string_too_short",
+"loc": ["body", "name"], …}, …]}`, so a client had to parse two formats.
+
+I added a `RequestValidationError` handler to `problem.install()`. Now the same
+request gives `422 application/problem+json`:
+
+```json
+{"type": "https://example.com/problems/validation-error", "title": "Validation failed",
+ "status": 422, "detail": "2 invalid value(s) in the request", "instance": "/students",
+ "errors": [{"in": "body", "field": "name", "detail": "String should have at least 2 characters"},
+            {"in": "body", "field": "email", "detail": "value is not a valid email address: An email address must have an @-sign."}]}
+```
+
+`try_errors.py` now shows `validation-error` in the fifth row instead of `-`,
+and query parameters are covered too (`/courses?page_size=0` →
+`"in": "query", "field": "page_size"`).
+
+- **Where the list comes from:** FastAPI raises `RequestValidationError`
+  before the route runs, and `exc.errors()` returns Pydantic's list — one
+  dict per wrong value with `loc` (e.g. `["body", "name"]`), `msg` and service
+  fields. The handler turns each into `{"in": loc[0], "field": the rest of loc
+  joined with ".", "detail": msg}`. Both mistakes arrive at once, so the client
+  can fix everything in one go.
+- **Why `errors` is an extension:** RFC 9457 defines the five standard members
+  (`type`, `title`, `status`, `detail`, `instance`) and explicitly allows
+  problem types to add their own members. A list of invalid fields only makes
+  sense for the `validation-error` type, so it's an extension of that type,
+  not a required part of every problem; clients that don't know it can still
+  read the standard fields.
+
 ## Lab 7 — SQLAlchemy and Alembic
 
 ### What changed in the API
