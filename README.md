@@ -1,9 +1,9 @@
-Inzhu Rakhym, IT3-2301, labs 4–8
+Inzhu Rakhym, IT3-2301, labs 4–9
 
 # course-catalog-api
 
-Backend of the course catalog: FastAPI, SQLAlchemy 2.1, PostgreSQL, Alembic and
-GraphQL on Strawberry as a second entrance (Labs 4–8, "Advanced Web Technologies").
+Backend of the course catalog: FastAPI, SQLAlchemy, PostgreSQL, Alembic migrations,
+GraphQL on Strawberry, and JWT login with roles (Labs 4–9, “Advanced Web Technologies”).
 
 ## How to run
 
@@ -23,27 +23,151 @@ Then, from the project folder:
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env               # DATABASE_URL and GRAPHQL_INTROSPECTION
-alembic upgrade head               # creates the tables (migrations 0001 and 0002)
+cp .env.example .env
+# put a random key into SECRET_KEY in .env (at least 32 characters):
+python -c "import secrets; print(secrets.token_hex(32))"
+alembic upgrade head               # migrations 0001, 0002, 0003 (users)
 psql -h localhost -U catalog_app -d course_catalog -v ON_ERROR_STOP=1 -f seed.sql
+python seed_users.py               # the four demo accounts below
 alembic check                      # "No new upgrade operations detected."
 fastapi dev main.py
 ```
 
-In a second window, with the server running, the check scripts should print:
-`python try_errors.py` — 5 of 5, `python try_graphql.py` — 8 of 8,
-`python try_n_plus_1.py` — 3 and 3 SQL queries, `python measure.py` — REST
-5 requests in 2 rounds, GraphQL 1 request in 1 round. `python print_schema.py`
-prints the GraphQL schema.
+Without `SECRET_KEY` (or with a key shorter than 32 characters) the
+application refuses to start. REST docs: http://localhost:8000/docs (the
+**Authorize** button logs in with e-mail and password). GraphiQL:
+http://localhost:8000/graphql (put `{"Authorization": "Bearer <token>"}` into
+the Headers panel).
 
-REST docs: http://localhost:8000/docs. GraphiQL: http://localhost:8000/graphql.
-The password `change-me` is for training; real projects don't commit passwords.
+Demo users (course passwords; a real project never publishes them):
 
-The “My courses” pages are in the frontend repository (course-catalog):
-`/my-courses` (GraphQL) and `/my-courses-rest` (REST), run with `npm run dev`
-while the API is running.
+| E-mail | Role | Password |
+|--------|------|----------|
+| admin@example.com | admin | admin-demo-password |
+| aigerim@example.com | student (student 1) | aigerim-demo-pass |
+| daniyar@example.com | student (student 2) | daniyar-demo-pass |
+| asel@example.com | student (student 3) | asel-demo-password |
 
-## What changed in the API
+`seed.sql` also clears `users`: after it, always run `python seed_users.py`.
+
+Check scripts (server running): `check_users.py` 4 of 4, `try_auth.py` 6 of 6,
+`try_tokens.py` 9 of 9, `try_access.py` 14 of 14, `try_errors.py` 5 of 5,
+`try_graphql_access.py` 9 of 9, `try_graphql.py` 8 of 8, `try_n_plus_1.py` 4
+and 4, `try_timing.py` two close medians, `scan_routes.py`, `scan_graphql.py`.
+
+The login pages are in the frontend repository (course-catalog): `/login` and
+`/account`, run with `npm run dev` while the API is running.
+
+## Access matrix
+
+The codes come from `python try_access.py` (14 of 14 as expected). The “—” cell: the
+administrator has no student profile, so there is nobody to enroll “for yourself”.
+
+| Request | Anonymous | Student | Administrator |
+|---------|-----------|---------|---------------|
+| `GET /courses` | 200 | 200 | 200 |
+| `GET /me` | 401 | 200 | 200 |
+| `GET /enrollments` | 401 | 403 | 200 |
+| `POST /enrollments`, for yourself | 401 | 201 | — |
+| `POST /enrollments`, for another | 401 | 403 | 201 |
+
+## Open spots
+
+Found by `scan_routes.py` and `scan_graphql.py`; not closed in this lab. My
+scanner finds one more REST route than the lab's example — `GET /stats`, left
+from the Lab 4 bonus — so the table has 17 rows.
+
+| Route or field | Verdict | How to close it |
+|----------------|---------|-----------------|
+| `GET /` | by design: a health check, no data | no need to close it |
+| `GET /courses` | by design: the catalog is open to everyone | no need to close it |
+| `GET /courses/{id}` | by design: a course page is public | no need to close it |
+| `POST /courses/{id}/like` | a hole: an anonymous caller inflates the counter as much as they like | `CurrentUser`, one like per user (a `likes` table with `UNIQUE (user_id, course_id)`) |
+| `POST /students` | a hole: anyone creates student profiles (spam, fake students) | `AdminUser` (profiles are created by the administrator or together with registration) |
+| `GET /students/{id}` | a hole: anyone reads any student's name and **e-mail** by trying numbers 1, 2, 3… | `CurrentUser` + `can_access_student` (yourself or admin), or return the profile without e-mail |
+| `GET /students/{id}/enrollments` | a hole: anyone sees which courses a student takes | `CurrentUser` + `can_access_student`, the same rule as `GET /enrollments` |
+| `GET /stats/courses` | by design: aggregate numbers per course, no personal data | no need to close it (or `AdminUser`, if numbers are internal) |
+| `GET /stats` | by design: catalog totals, no personal data | no need to close it |
+| GraphQL `courses` | by design: the public catalog | no need to close it |
+| GraphQL `course` | by design: the public catalog | no need to close it |
+| GraphQL `student` | a hole: name and the list of courses of any student (e-mail is already closed by `IsSelfOrAdmin`) | `IsAuthenticated` on the query and `IsSelfOrAdmin` on `Student.enrollments` |
+| GraphQL `enrollments` | a hole: all enrollments of all students — the same data as `GET /enrollments`, which is admin-only in REST | `IsAdmin`, like `students` |
+| GraphQL `Course.enrollments` | a hole: from the public `courses` you reach who is enrolled in each course | `IsAdmin` on the field (the public catalog keeps only course fields) |
+| GraphQL `Student.enrollments` | a hole: a student's courses through `student(id)` | `IsSelfOrAdmin` on the field |
+| GraphQL `enroll` | a hole: an anonymous caller enrolls any student in any course — `POST /enrollments` is closed in REST, but this mutation leads to the same `services.enroll` | move the check into the service layer (pass the user to `services.enroll` and call `can_access_student` there), so both entrances share it; or `IsAuthenticated` + the owner check in the resolver |
+| GraphQL `likeCourse` | a hole: the same as `POST /courses/{id}/like` | `IsAuthenticated`, one like per user |
+
+Compared with the matrix from step 3: enrollments are closed in REST, but the
+same data and the same action are still reachable through `GET
+/students/{id}/enrollments` and the GraphQL `enrollments` / `enroll`. The rule
+must live in one place shared by both entrances, and new routes should be
+closed by default (a router with `dependencies=[Depends(get_current_user)]`).
+
+## Threat table
+
+| Where | What can break | How it is covered | How I checked |
+|-------|----------------|-------------------|---------------|
+| The login form | the answer reveals whether an e-mail is registered (different text or different time); passwords are guessed by brute force | one text `Incorrect email or password` for any failure; `authenticate` always verifies a hash — `DUMMY_HASH` for an unknown e-mail; Argon2id makes each attempt cost ~30 ms | `try_auth.py` 6 of 6 (same 401 text); experiment 2: with `DUMMY_HASH` 29.6 vs 30.2 ms, without it 2.2 vs 29.6 ms (13× faster for an unknown e-mail) |
+| Passwords and the key | a leak of `users` reveals passwords; tokens can be forged if the key is weak, in the code, or in git | `password_hash` is Argon2id (`$argon2id$v=19$m=65536,t=3,p=4$…`, a new salt every time); `SECRET_KEY` only in `.env` (in `.gitignore`), `Field(min_length=32)`, no default | `check_users.py` 4 of 4; experiment 1: no key → `Field required`, `short` → `String should have at least 32 characters`; `git ls-files` has no `.env` |
+| Token and role | a forged, expired or foreign token is accepted; a revoked role keeps working until the token expires | `jwt.decode` with `algorithms=["HS256"]`, `issuer`, `require: exp, sub, iss`; `int(sub)` and `db.get(User, id)`; the role is read from `users` on every request | `try_tokens.py` 9 of 9 (with the signature check off: 3 of 9, an unsigned token got in as `admin@example.com`); experiment 4: the same admin token 200 → 403 right after `UPDATE users SET role = 'student'` |
+| Permissions on objects | BOLA: a student acts on someone else's object; forgotten routes; a protected GraphQL path but an open field | `require_admin` / `AdminUser`, `can_access_student` in `POST /enrollments`; `IsAuthenticated`, `IsAdmin`, `IsSelfOrAdmin` on fields; nullable `Student.email` | `try_access.py` 14 of 14 (experiment 5: without the owner check 13 of 14, Aigerim enrolled Daniyar); `try_graphql_access.py` 9 of 9 (experiment 6: 7 of 9); the scanners list 9 + 8 open spots |
+| Cookie and Next.js | the token is stolen by a script (XSS) or sent by another site (CSRF); a page trusts any cookie | the token only in the `session` cookie: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, `maxAge` 900; `proxy.ts` is only a quick check, `verifySession()` asks the API `/me` next to the data | browser check: all 7 rows, `document.cookie` = `""`; experiment 7: a forged cookie → 307 (API log `GET /me 401`); with only `proxy.ts` the forged cookie opened the page (200) |
+| Logout and lifetime | a copied token keeps working after “Log out” | the cookie is deleted; the token itself lives at most 15 minutes (`exp − iat = 900`) | experiment 8: after “Log out” the copied token still gave `200` on `/me` (870 s left until `exp`) |
+
+Deliberately not closed:
+
+- **Limiting login attempts.** I'd keep the counter of failed attempts in a
+  shared store (Redis, or a database table) rather than in process memory:
+  with several server processes each would have its own counter, and an
+  attacker would get N times more attempts. The limit should be by IP *and* by
+  e-mail with a growing delay, not only by e-mail: a pure per-e-mail lock lets
+  anyone block someone else's account just by typing their address with wrong
+  passwords. The price: one more read and write per login and a store to run.
+- **The token after “Log out”.** For this project I'd pick `token_version` in
+  `users`: logout (on all devices) increases the number, and tokens with the
+  old version stop working. We already read the user from the database on
+  every request, so it costs no extra query — only one column and a comparison.
+  A refresh token with a short access token would be the next step if logging
+  out on one device must be possible.
+
+## Experiment log
+
+| No. | Experiment | What I saw | Cause | How I fixed it |
+|-----|------------|------------|-------|----------------|
+| 1 | no key, a short key; two hashes of one password | no key: `secret_key Field required`; `SECRET_KEY=short`: `String should have at least 32 characters`. Hashing: ~26–30 ms; two hashes of the same password differ (`h1 == h2` → `False`), both pass `verify`, `wrong` → `False`; parts `argon2id`, `v=19`, `m=65536,t=3,p=4`, salt, hash | `secret_key` is required with `min_length=32`; a default like `"secret"` in the code would let anyone who sees the repository sign tokens. Argon2id is slow on purpose and salted, so equal passwords give different hashes; SHA-256 is fast — billions of guesses per second on a GPU | put the real key back; nothing to fix in the hashing |
+| 2 | login time with and without `DUMMY_HASH` | with: unknown 30.1 ms, known 29.9 ms; without: unknown **2.2 ms**, known **29.6 ms** — about 13× | without `DUMMY_HASH` the unknown e-mail skips the expensive Argon2 check, so the time tells which addresses are registered | `git restore auth.py`: 29.6 vs 30.2 ms again |
+| 3 | nine forged tokens; signature check turned off | 9 of 9 rejected with `Invalid or expired token`. With `options={"verify_signature": False}`: 3 of 9 — `expired`, `another key`, `another issuer`, `no exp` gave 200 as Aigerim, and `payload edited` and `alg none` gave 200 as **admin@example.com** | turning off the signature also turns off `exp`, `iss` and `require`; only `int(sub)` and the user lookup still worked. The most important protection is the signature: without it anyone writes any `sub` | `git restore security.py`: 9 of 9 |
+| 4 | the role changes in the database, the token is the same | admin token: 200 → **403** right after `UPDATE users SET role = 'student'`, 200 again after restoring; Aigerim's token: 403 → 200 after raising to admin → 403 | the role is read from `users` on every request, not from the token. The price: a `SELECT` on `users` per request | restored the roles; for a service where admins change once a year I'd put the role in the token, for a bank — read it from the database (or very short tokens) |
+| 5 | the owner check in `POST /enrollments` removed | `try_access.py` 13 of 14: `POST /enrollments, for another` → `201 (want 403)`; Aigerim enrolled Daniyar (`id 20, Daniyar Bekov, web-security`), and the table doesn't say who did it | BOLA: the server trusted `studentId` from the body. Unlike experiment 3, the token was genuine — authentication worked, authorization was missing. Detecting it needs the request log plus `sub` of the token | deleted the record, `git restore main.py`: 14 of 14, 6 enrollments |
+| 6 | the path closed, not the field; the closed field not nullable | a) only `students` closed: `student(2).email` → `daniyar@example.com`, `enrollments → student.email` → `4 shown, 0 hidden` (7 of 9). b) `email: str` with the permission: `{"data":{"student":null},…}` — the name was lost too; through enrollments the whole `data` was `null` (`path: ["enrollments", 2, "student", "email"]`) | the same `Student` is reachable through `student(id)` and `enrollments → student`, so a check on one root query doesn't cover the type; a denied non-null field propagates null to the parent (and up to `data`) | `git restore graphql_api.py`: 9 of 9. **The protection sits on the field of the type, not on the query that leads to it** |
+| 7 | a forged cookie; protection only in `proxy.ts` | no cookie and a forged cookie both → 307 to `/login`, but with the forged one the API log showed `GET /me 401`. With a page that doesn't call `verifySession()`: no cookie 307, forged cookie **200** with “Secret account data” | `proxy.ts` only checks that a cookie exists; the real check is `verifySession()`, which shows the token to the API | `git restore app/account/page.tsx`: forged cookie → 307 again. Every page with user data must call `verifySession()` itself |
+| 8 | the token after “Log out” | the cookie disappeared and `/account` sent me to `/login`, but the copied token still gave `{"id":2,"email":"aigerim@example.com",…}` on `/me` (870 s left until `exp`) | “Log out” only deletes the cookie in the browser; the server keeps no list of tokens, and a signed token is valid until `exp` | nothing to restore; risk reducers: short lifetime + refresh token, `token_version` (logout on all devices) or a `jti` blacklist. **“Log out” guarantees that this browser no longer sends the token; it does not guarantee that a copied token stops working before it expires (up to 15 minutes)** |
+
+## Decisions
+
+- **The role is read from the database on every request.** The price is one
+  `SELECT` on `users` per request with a token (that's why `try_n_plus_1.py`
+  shows 4 queries instead of 3). In return a role change or a deleted user
+  takes effect at once: in experiment 4 the same admin token got 403 right
+  after the demotion. With the role inside the token it would keep working for
+  up to 15 minutes.
+- **The closed GraphQL field is nullable, and the permission is on the type's
+  field.** `Student` is reachable through `student(id)`, `students` and
+  `enrollments → student`; a check on one root query left the other doors open
+  (experiment 6a: 4 e-mails shown). And a denied field that can't be null
+  destroys its parent — the client lost the allowed name, and through the list
+  the whole `data` (experiment 6b). With `str | None` only the e-mail becomes
+  null.
+- **`proxy.ts` checks only that a cookie exists, `verifySession()` stands next
+  to the data.** `proxy.ts` can't verify a token without calling the API: any
+  made-up `session` cookie passes it (experiment 7b opened the page with a
+  forged cookie). It's only a convenience that redirects obvious anonymous
+  visitors early. The real decision — signature, expiry, role in the database —
+  happens when the page calls `verifySession()` and the API checks `/me`.
+
+## Lab 8 — GraphQL alongside REST
+
+### What changed in the API
 
 - **REST errors are Problem Details** (RFC 9457): rule errors come with the
   content type `application/problem+json` and a body with `type`, `title`,
@@ -75,7 +199,7 @@ while the API is running.
 - **New REST routes**: `GET /students/{id}` (404 Problem Details if there's no
   such student) and `GET /students/{id}/enrollments`.
 
-## Example queries
+### Example queries
 
 The “My courses” query (in the GraphiQL Variables panel: `{"id": "2"}`):
 
@@ -114,7 +238,7 @@ The same mutation again (a repeated enrollment):
 {"data": {"enroll": {"enrollment": null, "userErrors": [{"code": "ALREADY_ENROLLED", "message": "Student is already enrolled in this course"}]}}}
 ```
 
-## REST vs GraphQL comparison
+### REST vs GraphQL comparison
 
 The “My courses” screen of student 2; numbers from `measure.py`, starting data.
 
@@ -138,7 +262,7 @@ query), errors have real statuses, and the cost is limited by the route itself.
 GraphQL needs extra work to stay safe and fast — DataLoaders against N+1 (27
 queries without them) and limits against expensive queries.
 
-## Experiment log
+### Experiment log
 
 | # | Experiment | What I saw | Cause | How I fixed it |
 |---|------------|------------|-------|----------------|
@@ -175,7 +299,7 @@ Experiment 6 in detail (`try_protection.py`, `flood_likes.py`):
 - **If `max_depth` were 2,** the “My courses” query (`student → enrollments →
   course`, depth 3) — the main screen of the app — would be rejected.
 
-## Decisions
+### Decisions
 
 - **The rules live in `services.py`, and each layer translates the code.** If
   REST and GraphQL each had their own copy of the constraint dictionary and the
@@ -196,9 +320,9 @@ Experiment 6 in detail (`try_protection.py`, `flood_likes.py`):
   error.`, so internals like SQL text don't leak, while the full traceback
   stays in the server log for the developer.
 
-## Bonus
+### Bonus
 
-### Task 1. Validation errors as Problem Details too
+#### Task 1. Validation errors as Problem Details too
 
 After step 1 the four rule errors were Problem Details, but a Pydantic
 validation error still came in FastAPI's own format: `python try_post.py N bad`
