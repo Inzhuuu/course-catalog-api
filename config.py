@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -5,6 +6,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
     database_url: str
+    secret_key: str = Field(min_length=32)
+    access_token_minutes: int = 15
     sql_echo: bool = False
     graphql_introspection: bool = True
 

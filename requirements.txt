@@ -4,3 +4,5 @@ psycopg[binary]
 alembic
 pydantic-settings
 strawberry-graphql[fastapi]
+pyjwt
+pwdlib[argon2]
