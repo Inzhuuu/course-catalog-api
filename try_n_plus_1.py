@@ -1,6 +1,14 @@
 import httpx
 
-URL = "http://localhost:8000/graphql"
+BASE = "http://localhost:8000"
+URL = BASE + "/graphql"
+
+# The students query is now for the administrator only: log in and pass the token.
+login = httpx.post(
+    f"{BASE}/auth/login",
+    data={"username": "admin@example.com", "password": "admin-demo-password"},
+)
+HEADERS = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 QUERIES = [
     (
@@ -14,7 +22,7 @@ QUERIES = [
 ]
 
 for title, query in QUERIES:
-    response = httpx.post(URL, json={"query": query})
+    response = httpx.post(URL, json={"query": query}, headers=HEADERS)
     response.raise_for_status()
     rows = len(next(iter(response.json()["data"].values())))
     queries = response.headers["x-sql-queries"]
