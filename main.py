@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ import auth
 import counter
 import problem
 import services
-from auth import AdminUser, CurrentUser, can_access_student
+from auth import AdminUser, CurrentUser, can_access_student, get_current_user
 from db import get_db
 from graphql_api import graphql_app
 from models import Course, Enrollment, Student
@@ -162,3 +162,15 @@ def get_stats(db: SessionDep):
         func.count(Course.id).filter(Course.is_elective).label("electives"),
     )
     return db.execute(stmt).one()
+
+
+# Closed by default: every route of this router requires a token by itself.
+protected = APIRouter(dependencies=[Depends(get_current_user)])
+
+
+@protected.get("/secret")
+def secret():
+    return {"ok": True}
+
+
+app.include_router(protected)

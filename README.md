@@ -165,6 +165,42 @@ Deliberately not closed:
   visitors early. The real decision — signature, expiry, role in the database —
   happens when the page calls `verifySession()` and the API checks `/me`.
 
+## Bonus (branch `lab9-extras`)
+
+### Task 1. Closed by default: a router with a dependency
+
+The scanner found open routes because the check has to be written on every
+route by hand. On this branch `main.py` has a router where the check is part
+of the router itself:
+
+```python
+protected = APIRouter(dependencies=[Depends(get_current_user)])
+
+@protected.get("/secret")
+def secret():
+    return {"ok": True}
+
+app.include_router(protected)
+```
+
+The route knows nothing about tokens, but:
+
+- without a token: `401 Unauthorized`, `www-authenticate: Bearer`,
+  `{"type":"about:blank","title":"Unauthorized","status":401,"detail":"Not authenticated","instance":"/secret"}`;
+- with Aigerim's token: `{"ok":true}`;
+- `scan_routes.py` added the row `GET /secret  401  200  200` by itself, and the
+  route is **not** in the “open without a token” list; `try_access.py` is
+  still 14 of 14.
+
+What I'd move into such a router: everything that touches personal data or
+changes data — `POST /courses/{id}/like`, `POST /students`,
+`GET /students/{id}`, `GET /students/{id}/enrollments` (plus the owner check
+inside), `/me` and the enrollments. What deliberately stays outside: the
+public catalog (`GET /`, `GET /courses`, `GET /courses/{id}`, the statistics)
+and `/auth/login` — someone without a token must be able to log in. With this
+layout a new route is closed unless someone consciously puts it into the
+public router. `/secret` is only a demonstration and isn't on `main`.
+
 ## Lab 8 — GraphQL alongside REST
 
 ### What changed in the API
