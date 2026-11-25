@@ -58,3 +58,17 @@ class Stats(CamelModel):
     total: int
     total_credits: int
     electives: int
+
+
+class Token(BaseModel):
+    """The field names are set by RFC 6749 (snake_case), an exception to camelCase."""
+
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserOut(CamelModel):
+    id: int
+    email: EmailStr
+    role: str
+    student_id: int | None
